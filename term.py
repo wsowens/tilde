@@ -1,40 +1,41 @@
 import curses
 import logging
+from queue import Queue
 
 class Cursor:
     def __init__(self, r, c):
         self.r = r
         self.c = c
 
-
 class Buffer:
-    pass
+    def __init__(self):
+        self.rows = [""] 
+        self.new_rows = []
 
-class BoundedBuffer:
-    def __init__(self, rows, cols):
-        self.cols = cols
-        self.chars = ""
-        self.rows = []
-    '''
-    def append(self, string):
-        current_row = self.rows[:-1]
-        for char in string:
-            while len(current_row) < self.cols:
-    '''
-    #def __setattr__(self, name, value):
-        
+    def append(self, input_string):
+        new_rows = input_string.split("\n")
+        # add the content of this row directly to the last
+        self.rows[0] += new_rows[0]
+        # any newlines mean splitting into new row of buffer
+        self.rows.extend(new_rows[1:])
     
-    def resize(self):
-        pass
-        
-    
-    
-    def __iter__(self):
-        for row in self.rows:
-            yield row
+    def clear(self):
+        self.rows = [""]
 
-class Viewport:
-    pass
+    def __iadd__(self, input_string):
+        '''overriding += with append'''
+        self.append(input_string)
+        return self
+
+    def __len__(self):
+        return len(self.rows)
+
+    #def new(self):
+         
+
+#class BoundedBuffer:
+     
+
 
 class InputStream:
     '''wrapping window.getchr() into an input stream'''
@@ -44,10 +45,10 @@ class InputStream:
         self._win.nodelay(True)
     
     def __iter__(self):
-        c = self._win.getchr()
-        if c == -1:
+        char = self._win.getchr()
+        if char == -1:
             return
-        yield c
+        yield char
     
 
 class Renderer:
@@ -57,7 +58,9 @@ class Renderer:
     def from_buffer(self, buff, wrap=True):
         self._scr.clear()
         logging.info("Attempting to render from buffer:\n{}".format(buff))
-        if wrap:
+        # get the minimum number of lines available
+        lines_available = min(curses.LINES, len(buff))
+        if isinstance 
             self._scr.addstr(0, 0, buff)
         else:
             lines = buff.split("\n")
