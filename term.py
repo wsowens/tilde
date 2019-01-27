@@ -2,6 +2,14 @@
 import curses
 import logging
 
+def chunk_str(input_str, size):
+    if "\n" in input_str:
+        return
+    if len(input_str) == 0:
+        return []
+    return [input_str[:size]] + chunk_str(input_str[size:], size)
+    
+
 
 class Buffer:
     '''Buffer without bounds on the rows'''
@@ -72,7 +80,7 @@ class BoundedBuffer(Buffer):
     @staticmethod
     def convert_unbounded(old, bound):
         new_buff = BoundedBuffer(bound)
-        new_buff.append(str(old)
+        new_buff.append(str(old))
     
 
 
@@ -95,21 +103,21 @@ class Renderer:
     def __init__(self, screen):
         self._scr = screen
 
-    def entire_buffer(self, buff):
+    def entire_buffer(self, buff, wrap=True):
         '''render an entire buffer, including old data'''
         self._scr.clear()
-        logging.info("Attempting to render from buffer:\n%s" % str(buff))
+        height, width = self._scr.getmaxyx()
+        logging.info("Attempting to render from buffer:\n%s" % str(buff)[:10])
         # get the minimum number of lines available
-        lines_avail = min(curses.LINES, len(buff))
-        cols_avail = curses.COLS
+        lines_avail = min(height, len(buff))
         for line_no in range(lines_avail):
-            self._scr.addstr(line_no, 0, list(buff)[line_no-lines_avail][:cols_avail])
+            self._scr.addstr(line_no, 0, list(buff)[line_no-lines_avail][:width])
     '''
         else:
             lines = buff.split("\n")
-            can_render = min(curses.LINES, len(lines))
+            can_render = min(y, len(lines))
             for i in range(can_render):
-                self._scr.addstr(i, 0, lines[i-can_render][:curses.COLS])
+                self._scr.addstr(i, 0, lines[i-can_render][:x])
  '''
     def refresh(self):
         '''refresh the screen'''
@@ -127,7 +135,8 @@ class Terminal:
         self._has_cbreak = None
         self.cbreak(True)
         self.echo(False)
-        self.buff = Buffer()
+        self.buff = BoundedBuffer(curses.COLS)
+        self._updater = self._main_update
 
 
     def echo(self, to_echo=None):
@@ -172,6 +181,13 @@ class Terminal:
         self.scr.refresh()
 
     def update(self):
+        self._updater()
+    
+    def reset_mode(self):
+        self._updater = self._main_update
+    
+    curvis = 0 
+    def _main_update(self):
         logging.info("Doing update")
         char = self.scr.getch()
         if char == -1:
@@ -188,10 +204,78 @@ class Terminal:
             while self.scr.getch() == curses.KEY_RESIZE:
                 continue
             self.resize()
+        elif char == ord('d'):
+            self.spawn_dialog("Test", "This is a test", ["<Java>", "<Python>", "<Bash>"])
+        elif char == ord('v'):
+            curses.curs_set(self.curvis)
+            self.curvis = (self.curvis + 1 ) % 3
         else:
             self.render.entire_buffer(self.buff)
             self.render.refresh()
+   
+    def spawn_dialog(self, title, msg, options):
+        height,width = self.scr.getmaxyx()
+        subheight = height // 2
+        subwidth = width // 2
+        starty = (height - subheight) // 2
+        startx = (width - subwidth) // 2
+        subwin = self.scr.subwin(subheight, subwidth, starty, startx)
+        dialog = DialogWindow(self, subwin, title, msg, options)
+        self.updater = lambda x: dialog.update()
+      
 
+class DialogWindow:
+    def __init__(self, term, window, title, msg, options):
+        self.term = term
+        self.window = window
+        self.window.nodelay(True)
+        y, x = window.getmaxyx()
+        self.width = x
+        self.height = y
+        if title is not None:
+            spaces = ((x + 1) - len(title) ) // 2  - 1
+            spaces = " " * spaces 
+            title = spaces + title
+        else:
+            title = ""
+        self.title = title
+        self.msg = msg
+        self.options = options
+        self.selected = 0
+        self.done = False
+        self.render()
+
+    def update(self): 
+        char = self.window.getchr()
+        if char != -1:
+            return None
+        else:
+            self.done = True
+            self.term.reset_mode()
+            return self.selected
+    
+    def render(self):
+        self.window.clear()
+        self.window.border(curses.ACS_BLOCK, curses.ACS_BLOCK , curses.ACS_BLOCK, curses.ACS_BLOCK, curses.ACS_BLOCK, curses.ACS_BLOCK, curses.ACS_BLOCK, curses.ACS_BLOCK)
+        self.window.addstr(1, 1, self.title, self.width - 3)
+        # break msg into chunks
+        xpos = 1
+        for pos, option in self.spatially_format():
+            self.window.addstr(self.height-3, pos, option)
+        self.window.addstr(3, 1, self.msg)
+        self.window.refresh() 
+
+    def spatially_format(self):
+        lengths = list(map(len, self.options))
+        free_space = self.width - sum(lengths) - 2
+        inner_space = free_space // (len(self.options))
+        output = []
+        left_space = (inner_space + free_space % (len(self.options) + 1)) // 2
+        start = left_space
+        for i in self.options:
+            output.append((start, i))
+            start += inner_space + len(i)  
+        return output
 
 class Application:
     def __init__(self, win):
