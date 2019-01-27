@@ -1,15 +1,78 @@
 '''Includes all basic terminal functionality'''
 import curses
 import logging
-
+import re
 def chunk_str(input_str, size):
     if "\n" in input_str:
-        return
+        output = []
+        for item in map(lambda x: chunk_str(x, size), input_str.split("\n")):
+            output += item
+        return output
     if len(input_str) == 0:
         return []
     return [input_str[:size]] + chunk_str(input_str[size:], size)
-    
 
+NONWHITESPACE = re.compile(r"\S+")
+def chunk_word(input_str, size):
+    '''makes formatting assumptions, do not use for something like a shell'''
+    global WHITESPACE
+    if "\n" in input_str:
+        output = []
+        for item in map(lambda x: chunk_word(x, size), input_str.split("\n")):
+            output += item
+        return output
+    
+    words = [str(match) for match in NONWHITESPACE.findall(input_str)]
+    print(words)
+    output = []
+    current = ""
+    for word in words:
+        print(word)
+        print(output)
+        remaining = size - len(current)
+        if len(word) == remaining:
+            current += word 
+        elif len(word) < remaining:
+            current += word + " "
+        elif len(word) == size:
+            output.append(current)
+            current = ""
+            current += word + " "
+        elif len(word) < size:
+            output.append(current)
+            current = ""
+            current += word + " "
+        else:
+            while word:
+                remaining = size - len(current)
+                if len(word) > remaining:
+                    current += (word[:remaining-1] + "-")
+                    word = word[remaining-1:]
+                    output.append(current)
+                    current = ""
+                elif len(word) < remaining:
+                    current += word + " "
+                    output.append(current)
+                    word = ""
+                    current = ""
+                else:
+                    current += word
+                    output.append(current)
+                    word = ""
+                    current = ""
+                    
+    if current != "":
+        output.append(current)
+    return output
+
+print("12345678901234567890")
+for line in chunk_word("Super epic long sentence. Here's a new line.\nAhh, an extrordinarily great day!", 10):
+    print(line)
+    
+print("12345678901234567890")
+for line in chunk_str("Super epic long sentence. Here's a new line.\nAhh, an extrordinarily great day!", 10):
+    print(line)   
+#def wrap_words(input_str, size):
 
 class Buffer:
     '''Buffer without bounds on the rows'''
@@ -130,6 +193,7 @@ class Terminal:
         self.scr = curses.initscr()
         #disable input delays
         self.scr.nodelay(False)
+        self.scr.keypad(True)
         self.render = Renderer(self.scr)
         self._has_echo = None
         self._has_cbreak = None
@@ -137,6 +201,7 @@ class Terminal:
         self.echo(False)
         self.buff = BoundedBuffer(curses.COLS)
         self._updater = self._main_update
+        self.modestack = []
 
 
     def echo(self, to_echo=None):
@@ -183,8 +248,15 @@ class Terminal:
     def update(self):
         self._updater()
     
-    def reset_mode(self):
-        self._updater = self._main_update
+    def revert_mode(self):
+        if self.modestack:
+            self._updater = self.modestack.pop()
+        else:
+            self._updater = self._main_update
+    
+    def set_mode(self, mode):
+        self.modestack.append(self._updater)
+        self._updater = mode
     
     curvis = 0 
     def _main_update(self):
@@ -205,7 +277,7 @@ class Terminal:
                 continue
             self.resize()
         elif char == ord('d'):
-            self.spawn_dialog("Test", "This is a test", ["<Java>", "<Python>", "<Bash>"])
+            self.spawn_dialog("Test", "This is a test. What is your favorite programming language??? Remember, there are no wrong answers, unless you pick java.", ["<Java>", "<Python>", "<Bash>"])
         elif char == ord('v'):
             curses.curs_set(self.curvis)
             self.curvis = (self.curvis + 1 ) % 3
@@ -221,12 +293,13 @@ class Terminal:
         startx = (width - subwidth) // 2
         subwin = self.scr.subwin(subheight, subwidth, starty, startx)
         dialog = DialogWindow(self, subwin, title, msg, options)
-        self.updater = lambda x: dialog.update()
-      
+
 
 class DialogWindow:
     def __init__(self, term, window, title, msg, options):
         self.term = term
+        term.set_mode(self.update)
+
         self.window = window
         self.window.nodelay(True)
         y, x = window.getmaxyx()
@@ -244,26 +317,43 @@ class DialogWindow:
         self.selected = 0
         self.done = False
         self.render()
+        curses.curs_set(0)
 
     def update(self): 
-        char = self.window.getchr()
-        if char != -1:
-            return None
-        else:
+        char = self.term.scr.getch()
+        logging.info("UPDATE LOOP")
+        logging.info("%s\n" %  char)
+        logging.info("This is what key_left is:%s" % curses.KEY_LEFT)
+        if char == -1:
+            return
+        elif char == 10:
             self.done = True
-            self.term.reset_mode()
+            self.term.revert_mode()
+            curses.curs_set(2)
             return self.selected
+        elif char == curses.KEY_LEFT:
+            logging.info("KEY_LEFT")
+            self.selected = (self.selected - 1) % len(self.options)
+            self.render()
+        elif char == curses.KEY_RIGHT:
+            self.selected = (self.selected - 1) % len(self.options)
+            self.render()
     
     def render(self):
         self.window.clear()
         self.window.border(curses.ACS_BLOCK, curses.ACS_BLOCK , curses.ACS_BLOCK, curses.ACS_BLOCK, curses.ACS_BLOCK, curses.ACS_BLOCK, curses.ACS_BLOCK, curses.ACS_BLOCK)
-        self.window.addstr(1, 1, self.title, self.width - 3)
+        self.window.addnstr(1, 1, self.title, self.width - 3, curses.A_BOLD)
         # break msg into chunks
-        xpos = 1
-        for pos, option in self.spatially_format():
-            self.window.addstr(self.height-3, pos, option)
-        self.window.addstr(3, 1, self.msg)
-        self.window.refresh() 
+        start_y = 3
+        for chunk in chunk_word(self.msg, self.width - 4):
+            self.window.addnstr(start_y, 2, chunk, self.width-3)
+            start_y += 1
+        for index, pos, option in self.spatially_format():
+            if index == self.selected:
+                self.window.addstr(self.height-3, pos, option, curses.A_REVERSE)
+            else:
+                self.window.addstr(self.height-3, pos, option)
+        self.window.refresh()
 
     def spatially_format(self):
         lengths = list(map(len, self.options))
@@ -272,9 +362,9 @@ class DialogWindow:
         output = []
         left_space = (inner_space + free_space % (len(self.options) + 1)) // 2
         start = left_space
-        for i in self.options:
-            output.append((start, i))
-            start += inner_space + len(i)  
+        for index, opt in enumerate(self.options):
+            output.append((index, start, opt))
+            start += inner_space + len(opt)  
         return output
 
 class Application:
