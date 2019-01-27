@@ -5,7 +5,7 @@ import sys
 import traceback
 import term
 
-logging.basicConfig(filename='example.log', level=logging.DEBUG, filemode='w')
+logging.basicConfig(filename='backup.log', level=logging.DEBUG, filemode='w')
 
 myterm = term.Terminal()
 
@@ -14,7 +14,7 @@ Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu 
 '''
 
 text = sys.argv[1] if len(sys.argv) > 1 else LIPSUM
-#myterm.buff += text
+myterm.buff += text + "\n"
 try:
     while True:
         #handle background events

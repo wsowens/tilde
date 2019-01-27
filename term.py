@@ -16,7 +16,6 @@ def chunk_str(input_str, size):
 NONWHITESPACE = re.compile(r"\S+")
 def chunk_word(input_str, size):
     '''makes formatting assumptions, do not use for something like a shell'''
-    global WHITESPACE
     if "\n" in input_str:
         output = []
         for item in map(lambda x: chunk_word(x, size), input_str.split("\n")):
@@ -61,19 +60,11 @@ def chunk_word(input_str, size):
                     output.append(current)
                     word = ""
                     current = ""
-                    
     if current != "":
         output.append(current)
+    logging.info("\n".join(output))
     return output
 
-print("12345678901234567890")
-for line in chunk_word("Super epic long sentence. Here's a new line.\nAhh, an extrordinarily great day!", 10):
-    print(line)
-    
-print("12345678901234567890")
-for line in chunk_str("Super epic long sentence. Here's a new line.\nAhh, an extrordinarily great day!", 10):
-    print(line)   
-#def wrap_words(input_str, size):
 
 class Buffer:
     '''Buffer without bounds on the rows'''
@@ -85,7 +76,7 @@ class Buffer:
         '''append text to the buffer'''
         new_rows = input_string.split("\n")
         # add the content of this row directly to the last
-        self.rows[0] += new_rows[0]
+        self.rows[-1] += new_rows[0]
         # any newlines mean splitting into new row of buffer
         self.rows.extend(new_rows[1:])
 
@@ -108,7 +99,6 @@ class Buffer:
     def clear(self):
         '''clears everything in the buffer'''
         self.rows = [""]
-        self.new_rows = []
 
     def __str__(self):
         return "\n".join(self.rows)
@@ -116,7 +106,10 @@ class Buffer:
 
 #please tell me this wasn't a waste of time
 class BoundedBuffer(Buffer):
-    '''a buffer with a hard bound on the length of rows'''
+    '''a buffer with a hard bound on the length of rows
+    this buffer is ~~fundamentally~~ corrupted
+    storing strings in here means losing \n characters'''
+
     def __init__(self, bound):
         self._bound = bound
         super().__init__()
@@ -167,22 +160,26 @@ class Renderer:
     def __init__(self, screen):
         self._scr = screen
 
-    def entire_buffer(self, buff, wrap=True):
+    def entire_buffer(self, buff, wrap=True, chunker=chunk_word):
         '''render an entire buffer, including old data'''
         self._scr.clear()
         height, width = self._scr.getmaxyx()
-        logging.info("Attempting to render from buffer:\n%s" % str(buff)[:10])
+        logging.info("Attempting to render from buffer:\n%s..%s", str(buff)[:10], str(buff)[-10:])
         # get the minimum number of lines available
         lines_avail = min(height, len(buff))
-        for line_no in range(lines_avail):
-            self._scr.addstr(line_no, 0, list(buff)[line_no-lines_avail][:width])
-    '''
+        if wrap:
+            for line in buff:
+                for word in chunker(line, width):
+                    logging.info(word)
+                    if len(word) != width:
+                        word += "\n"
+                    self._scr.addstr(word)
         else:
-            lines = buff.split("\n")
-            can_render = min(y, len(lines))
-            for i in range(can_render):
-                self._scr.addstr(i, 0, lines[i-can_render][:x])
- '''
+            logging.info("Not wrapping.")
+            for line_no in range(lines_avail):
+                logging.info(list(buff)[line_no-lines_avail])
+                self._scr.addstr(line_no, 0, list(buff)[line_no-lines_avail][:width])
+
     def refresh(self):
         '''refresh the screen'''
         self._scr.refresh()
@@ -200,7 +197,7 @@ class Terminal:
         self._has_cbreak = None
         self.cbreak(True)
         self.echo(False)
-        self.buff = BoundedBuffer(curses.COLS)
+        self.buff = Buffer()
         self._updater = self._main_update
         self.modestack = []
 
@@ -269,7 +266,7 @@ class Terminal:
         logging.debug("Keypress: {}".format(char))
 
         if char == ord('w'):
-            self.buff += "hi there!"
+            self.buff += "hi there! "
             self.render.entire_buffer(self.buff)
             self.render.refresh()
         elif char == curses.KEY_RESIZE:
@@ -304,6 +301,7 @@ class DialogWindow:
 
         self.window = window
         self.window.nodelay(True)
+        self.window.keypad(True)
         y, x = window.getmaxyx()
         self.width = x
         self.height = y
@@ -322,10 +320,10 @@ class DialogWindow:
         curses.curs_set(0)
 
     def update(self): 
-        char = self.term.scr.getch()
+        char = self.window.getch()
         logging.info("UPDATE LOOP")
         logging.info("%s\n" %  char)
-        logging.info("This is what key_left is:%s" % curses.KEY_LEFT)
+        logging.info("This is what key_left is: %s", curses.KEY_LEFT)
         if char == -1:
             return
         elif char == 10:
@@ -339,7 +337,7 @@ class DialogWindow:
             self.selected = (self.selected - 1) % len(self.options)
             self.render()
         elif char == curses.KEY_RIGHT:
-            self.selected = (self.selected - 1) % len(self.options)
+            self.selected = (self.selected + 1) % len(self.options)
             self.render()
     
     def render(self):
@@ -372,7 +370,7 @@ class DialogWindow:
 
     def execute_option(self):
         self.term.buff += "You chose %s\n" % self.options[self.selected]
-        self.term.buff += "You are %s." % ("CORRECT" if self.selected == 1 else "WRONG")
+        self.term.buff += "You are %s.\n" % ("CORRECT" if self.selected == 1 else "WRONG")
         self.term.render.entire_buffer(self.term.buff)
 
 class Application:
