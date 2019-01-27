@@ -2,6 +2,7 @@
 import curses
 import logging
 import re
+
 def chunk_str(input_str, size):
     if "\n" in input_str:
         output = []
@@ -277,7 +278,7 @@ class Terminal:
                 continue
             self.resize()
         elif char == ord('d'):
-            self.spawn_dialog("Test", "This is a test. What is your favorite programming language??? Remember, there are no wrong answers, unless you pick java.", ["<Java>", "<Python>", "<Bash>"])
+            new = self.spawn_dialog("Test", "This is a test. What is your favorite programming language??? Remember, there are no wrong answers, unless you pick java.", ["<Java>", "<Python>", "<Bash>"])
         elif char == ord('v'):
             curses.curs_set(self.curvis)
             self.curvis = (self.curvis + 1 ) % 3
@@ -293,6 +294,7 @@ class Terminal:
         startx = (width - subwidth) // 2
         subwin = self.scr.subwin(subheight, subwidth, starty, startx)
         dialog = DialogWindow(self, subwin, title, msg, options)
+    
 
 
 class DialogWindow:
@@ -330,6 +332,7 @@ class DialogWindow:
             self.done = True
             self.term.revert_mode()
             curses.curs_set(2)
+            self.execute_option()
             return self.selected
         elif char == curses.KEY_LEFT:
             logging.info("KEY_LEFT")
@@ -366,6 +369,11 @@ class DialogWindow:
             output.append((index, start, opt))
             start += inner_space + len(opt)  
         return output
+
+    def execute_option(self):
+        self.term.buff += "You chose %s\n" % self.options[self.selected]
+        self.term.buff += "You are %s." % ("CORRECT" if self.selected == 1 else "WRONG")
+        self.term.render.entire_buffer(self.term.buff)
 
 class Application:
     def __init__(self, win):

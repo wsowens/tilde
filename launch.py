@@ -14,7 +14,7 @@ Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu 
 '''
 
 text = sys.argv[1] if len(sys.argv) > 1 else LIPSUM
-myterm.buff += text
+#myterm.buff += text
 try:
     while True:
         #handle background events
